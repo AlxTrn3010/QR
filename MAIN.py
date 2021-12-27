@@ -39,7 +39,7 @@ pcount = 0
 
 envdata = {"pcount": pcount, "Temperature": temp, "Humidity": humid, "active": active}
 qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
-qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
+default = {"ID":"","NAME":"","PIC":"", "Status": ""}
 qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
 
 
@@ -64,14 +64,6 @@ def safe_exit(signum, frame):
     exit(1)
 
 
-def get_approve() -> list:
-    results = []
-    with open('/home/pi/QR/resources/approve.csv', newline='') as inputfile:
-        for row in csv.reader(inputfile):
-            results.append(row[0])
-    return results
-
-
 def get_adict() -> dict:
     out = {}
     data = pd.read_csv("/home/pi/QR/resources/adict.csv", header=0).T.reset_index()
@@ -84,9 +76,8 @@ def get_adict() -> dict:
 approvedict = get_adict()
 
 def qr_decoder(frame, pcount):    
-        global qrdata, pre, img_crop, active
+        global qrdata, active
 
-        detector = cv2.QRCodeDetector()
         img = frame
         data = []
         # get bounding box coords and data
@@ -101,21 +92,20 @@ def qr_decoder(frame, pcount):
             if data:
                 # print("DATA")
                 if pcount <= 5:
-                    if data in get_approve():
+                    if data in approvedict["ID"]:
                         print("Approved")
                         qrdata = {"ID": data, "NAME": approvedict[data[0]]["NAME"],"PIC": [data[0]]["PIC"],  "Status": "Approved"}
                     else:
                         print("Denied")
-                        qrdata = {"ID": data, "Status": "Denied"}
+                        qrdata = {"ID": data, "NAME": "","PIC": "", "Status": "Denied"}
                 else:
                     print("Full")
-                    qrdata = {"ID": data, "NAME": approvedict[data[0]]["NAME"],"PIC": [data[0]]["PIC"],  "Status": "Full"}
+                    qrdata = {"ID": data, "NAME": "","PIC": "", "Status": "Full"}
                 active = false
             
 
 
 def gen(camera):
-    global qrdata
     IDLE = cv2.imread("/home/pi/QR/resources/IDLE.jpg")
     _, idle = cv2.imencode('.jpg', IDLE)
     idle = idle.tobytes()
@@ -137,51 +127,43 @@ def gen(camera):
     
     
 
-
 app = Flask(__name__)
 
 
-def runfeed():
+def runFlask():
     app.run(debug=True, use_reloader=False, port=5000, host='0.0.0.0')
-    
-# def geturl():
-#     app.run(debug=True, use_reloader=False, port=3000, host='0.0.0.0')
 
-def idle():
-    global qrdata, active, pre
+
+def HOLD_QRDATA():
+    global qrdata
     start = time.time()
     while not active and qrdata != defalt:
         if time.time() - start > 5:
              qrdata = default
-             break
 
 
 def LCD_CONTROL():
-    global qrdata
     while 1:
-        if active:
-            if qrdata != default:
+        if qrdata != default:
                 start = time.time()
                 lcd.clear()
                 lcd.setCursor(0,0)
                 lcd.write(4*" " +qrdata["ID"])
                 lcd.setCursor(1,0)
                 lcd.write(int((16-len(qrdata["Status"]))/2)*" "+qrdata["Status"])
-                while (time.time()-start < 5):
-                    #print("{:.2f}".format(time.time() - start))
-                    continue
-                qrdata = default
+        else:
+            if active:
+                if qrdata == default:
+                    lcd.clear()
+                    lcd.setCursor(0,0)
+                    lcd.write("  SCAN YOUR QR")
             else:
+                #print(active)
                 lcd.clear()
                 lcd.setCursor(0,0)
-                lcd.write("  SCAN YOUR QR")
-        else:
-            #print(active)
-            lcd.clear()
-            lcd.setCursor(0,0)
-            lcd.write("     Station")
-            lcd.setCursor(1,0)
-            lcd.write("      IDLE")
+                lcd.write("     Station")
+                lcd.setCursor(1,0)
+                lcd.write("      IDLE")
         time.sleep(0.3)
 
 
@@ -267,14 +249,15 @@ if __name__ == '__main__':
     lcd.setCursor(0,0)
     lcd.write("   Initiation")
     camera = VideoCamera()
+    detector = cv2.QRCodeDetector()
     signal(SIGTERM, safe_exit)
     signal(SIGHUP, safe_exit)
     http = ngrok.connect(5000, "http")
     print(get_ngrok_url())
     
     lcdth = threading.Thread(target=LCD_CONTROL).start() ##CONTROL
-    vth = threading.Thread(target=runfeed).start() ##FEED
-    idleth = threading.Thread(target=idle).start() ##idle-toggle
+    flaskth = threading.Thread(target=runFlask).start() ##FEED
+    idleth = threading.Thread(target=HOLD_QRDATA).start() ##idle-toggle
     sensorsth = threading.Thread(target=sensors).start() ##sensors   
 
 
