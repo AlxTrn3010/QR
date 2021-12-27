@@ -1,14 +1,15 @@
 from __future__ import print_function
-
-import threading
-
+from rpi_lcd import LCD
 from flask import Flask, Response, jsonify
+from signal import signal, SIGTERM, SIGHUP, pause
 
 import numpy as np
 import cv2
 import csv
 import random
 import time
+import threading
+
 
 active = False
 
@@ -18,9 +19,10 @@ default = {"ID":"", "Status": ""}
 pre = {"ID":"", "Status": ""}
 
 
-
-
-
+def safe_exit(signum, frame):
+    exit(1)
+    
+    
 def get_approve() -> list:
     results = []
     with open('approve.csv', newline='') as inputfile:
@@ -71,9 +73,7 @@ class VideoCamera(object):
 
 def gen(camera):
     global active, qrdata
-    IDLE = cv2.imread("IDLE.png")
-    _, feed = cv2.imencode('.jpg', IDLE)
-    feed = feed.tobytes()
+    
     while 1:
         if active:
             if not camera.isOpened():
@@ -84,6 +84,9 @@ def gen(camera):
 
             qr_decoder(frame, envdata["pcount"])
         else:
+            IDLE = cv2.imread("IDLE.png")
+            _, feed = cv2.imencode('.jpg', IDLE)
+            feed = feed.tobytes()
             camera.__del__()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + feed + b'\r\n\r\n')
@@ -141,14 +144,31 @@ def idle():
                     active = 0
                     pre = default
 
+
 def control():
-    pass
-
-
+    while 1:
+        if active:
+            print(active)
+            lcd.text(int(((16-8)/2))*"" +qrdata["ID"], 1)
+            lcd.text(int((16-len(qrdata["Status"]))/2)*""+qrdata["Status"], 2)
+        else:
+            print(active)
+            lcd.text(5*" "+"Station",1)
+            lcd.text(6*" "+"IDLE", 2)
+        
+        
+def safe_exit(signum, frame):
+        exit(1)
+        
+        
 if __name__ == '__main__':
+    lcd = LCD()
+    signal(SIGTERM, safe_exit)
+    signal(SIGHUP, safe_exit)
+    cth = threading.Thread(target=control).start() ##CONTROL
     vth = threading.Thread(target=runfeed).start() ##FEED
     idleth = threading.Thread(target=idle).start() ##idle-toggle
-    cth = threading.Thread(target=control).start() ##CONTROL
+    
 
 
 @app.route('/ACTIVE-IDLE-TOGGLE')
