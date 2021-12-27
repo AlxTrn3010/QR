@@ -38,9 +38,9 @@ humid = 0
 pcount = 0
 
 envdata = {"pcount": pcount, "Temperature": temp, "Humidity": humid, "active": active}
-qrdata = {"ID":"", "Status": ""}
-default = {"ID":"", "Status": ""}
-pre = {"ID":"", "Status": ""}
+qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
+qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
+qrdata = {"ID":"","NAME":"","PIC":"", "Status": ""}
 
 
 class VideoCamera(object):
@@ -72,30 +72,19 @@ def get_approve() -> list:
     return results
 
 
-def crop_rect(img, rect, offset: int):
-    # get the parameter of the small rectangle
-    center = rect[0]
-    size = rect[1]
-    angle = rect[2]
-    center, size = tuple(map(int, center)), tuple(map(int, size))
+def get_adict() -> dict:
+    out = {}
+    data = pd.read_csv("/home/pi/QR/resources/adict.csv", header=0).T.reset_index()
+    data.columns = data.loc[0, :]
+    data = data.drop(0, axis=0)
+    for ind in data.index:
+        out[data["ID"][ind]] = {"NAME":data["NAME"][ind], "PIC": data["PIC"][ind]}
+    return out
 
-    new = []
-    for item in size:
-        new.append(item + offset)
-
-    size = tuple(new)
-    # get row and col num in img
-    rows, cols = img.shape[0], img.shape[1]
-
-    M = cv2.getRotationMatrix2D(center, angle, 1)
-    img_rot = cv2.warpAffine(img, M, (cols, rows))
-    out = cv2.getRectSubPix(img_rot, size, center)
-
-    return out, img_rot
-
+approvedict = get_adict()
 
 def qr_decoder(frame, pcount):    
-        global qrdata, pre, img_crop
+        global qrdata, pre, img_crop, active
 
         detector = cv2.QRCodeDetector()
         img = frame
@@ -111,18 +100,18 @@ def qr_decoder(frame, pcount):
             data = data.upper()
             if data:
                 # print("DATA")
-                if pcount < 5:
+                if pcount <= 5:
                     if data in get_approve():
                         print("Approved")
-                        qrdata = {"ID": data, "Status": "Approved"}
+                        qrdata = {"ID": data, "NAME": approvedict[data[0]]["NAME"],"PIC": [data[0]]["PIC"],  "Status": "Approved"}
                     else:
                         print("Denied")
                         qrdata = {"ID": data, "Status": "Denied"}
                 else:
                     print("Full")
-                    qrdata = {"ID": data, "Status": "Full"}
-            else:
-                qrdata = default
+                    qrdata = {"ID": data, "NAME": approvedict[data[0]]["NAME"],"PIC": [data[0]]["PIC"],  "Status": "Full"}
+                active = false
+            
 
 
 def gen(camera):
@@ -145,7 +134,6 @@ def gen(camera):
            b'Content-Type:image/jpeg\r\n'
            b'Content-Length: ' + f"{len(feed)}".encode() + b'\r\n'
            b'\r\n' + feed + b'\r\n')
-    #camera.release()
     
     
 
@@ -161,27 +149,14 @@ def runfeed():
 
 def idle():
     global qrdata, active, pre
-    idle_time = 30
-    while 1:
-        #print(active, VideoCamera().isOpened())
-        if active:
-            #print(active)
-            pre = qrdata
-            if (qrdata == default):
-                start = time.time()
-                while(time.time() - start < idle_time):
-                    #print("IDLE IN: " + str(int(idle_time - (time.time() - start))))
-                    
-                    if qrdata != default:
-                        start = time.time()
-                        
-                active = False
-                qrdata = default
-                pre = default
-                print("SWITCH TO IDLE")
+    start = time.time()
+    while not active and qrdata != defalt:
+        if time.time() - start > 5:
+             qrdata = default
+             break
 
 
-def control():
+def LCD_CONTROL():
     global qrdata
     while 1:
         if active:
@@ -278,11 +253,6 @@ def sensors():
                 time.sleep(0.5)
                 
 
-        # Value of tempeture and Humidity in this variable
-        #print(temp)
-        #print(humid)
-    
-
 @atexit.register 
 def goodbye():
     lcd.clear()
@@ -301,14 +271,9 @@ if __name__ == '__main__':
     signal(SIGHUP, safe_exit)
     http = ngrok.connect(5000, "http")
     print(get_ngrok_url())
-#     lcd.clear()
-#     lcd.setCursor(0,0)
-#     lcd.write(get_ngrok_url())
-#     time.sleep(5)
     
-    cth = threading.Thread(target=control).start() ##CONTROL
+    lcdth = threading.Thread(target=LCD_CONTROL).start() ##CONTROL
     vth = threading.Thread(target=runfeed).start() ##FEED
-    #urlth = threading.Thread(target=geturl).start() ##socketXP get ngrok URL
     idleth = threading.Thread(target=idle).start() ##idle-toggle
     sensorsth = threading.Thread(target=sensors).start() ##sensors   
 
